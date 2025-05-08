@@ -1,0 +1,14 @@
+name: Deploy to Heroku
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: akhileshns/heroku-deploy@v3.12.12
+        with:
+          heroku_api_key: ${{HRKU-AAYDZFvlvk8DiOWW9mzB00jTYEjTy0S3Or7owZKMJX3A_____wTVh6rt1fKY}}
+          heroku_app_name: "boutiqueallin1"
+          heroku_email: "threeheartscanada@gmail.com"
