@@ -1,0 +1,1 @@
+web: node shopify-sync/server.js
