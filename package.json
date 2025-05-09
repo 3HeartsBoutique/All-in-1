@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "shopify-sync/server.js",
   "scripts": {
-    "start": "node shopify-sync/server.js"
+    "start": "node shopify-sync/server.js",
+    "postinstall": "cd ui && npm install && npm run build"
   },
   "dependencies": {
     "express": "^4.18.2",
