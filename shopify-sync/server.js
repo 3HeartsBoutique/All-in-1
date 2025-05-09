@@ -8,7 +8,13 @@ const port = process.env.PORT || 3000;
 const shopDomain = process.env.SHOPIFY_STORE_DOMAIN;
 const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// ✅ Enable SSL for Heroku Postgres
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 async function fetchProducts() {
   const url = `https://${shopDomain}/admin/api/2025-04/products.json?limit=250`;
