@@ -4,8 +4,8 @@
   "main": "shopify-sync/server.js",
   "scripts": {
     "start": "node shopify-sync/server.js",
-  "postinstall": "cd ui && npm install && npm run build"
-},
+    "postinstall": "cd ui && npm install && npm run build"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "axios": "^1.4.0",
