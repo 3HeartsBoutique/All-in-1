@@ -8,19 +8,19 @@ const bwipjs  = require('bwip-js');
 const { OpenAI } = require('openai');
 require('dotenv').config();
 
-const app = express();
+const app  = express();
 const port = process.env.PORT || 3000;
 
-// Build‐in React assets
+// 1) Serve your React UI build
 app.use(express.static(path.join(__dirname, '../ui/build')));
 
-// Postgres with SSL (Heroku)
+// 2) Postgres pool (Heroku SSL)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
 });
 
-// Ensure tables exist
+// 3) DB migrations
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -30,7 +30,8 @@ async function initDb() {
       brand TEXT,
       created_at TIMESTAMP,
       updated_at TIMESTAMP
-    );`);
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS listings (
       id SERIAL PRIMARY KEY,
@@ -42,10 +43,11 @@ async function initDb() {
       status TEXT,
       last_scrape_at TIMESTAMP,
       UNIQUE (channel, listing_id)
-    );`);
+    );
+  `);
 }
 
-// Shopify fetch + sync
+// 4) Shopify sync logic (unchanged)
 async function fetchProducts() {
   const shop  = process.env.SHOPIFY_STORE_DOMAIN;
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -67,6 +69,7 @@ async function syncProducts() {
          SET title = EXCLUDED.title, updated_at = NOW()`,
       [sku, p.title, p.vendor]
     );
+
     const inv = p.variants.reduce((sum,v) => sum + v.inventory_quantity, 0);
     await pool.query(
       `INSERT INTO listings 
@@ -82,33 +85,34 @@ async function syncProducts() {
        )
        ON CONFLICT (channel, listing_id) DO UPDATE
          SET inventory_count = EXCLUDED.inventory_count,
-             status = EXCLUDED.status,
-             last_scrape_at = NOW()`,
+             status          = EXCLUDED.status,
+             last_scrape_at  = NOW()`,
       [
         sku,
         p.variants[0].id.toString(),
         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/products/${p.id}`,
-        inv
+        inv,
       ]
     );
   }
   console.log(`Synced ${products.length} products.`);
 }
 
+// 5) Expose the sync route
 app.get('/sync/shopify', async (req, res) => {
   await initDb();
   await syncProducts();
   res.send('Shopify sync complete');
 });
 
-// Multer for file uploads & OpenAI client
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+// 6) File-upload + OpenAI setup
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });  
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Enrichment endpoint
+// 7) Enrichment endpoint
 app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   try {
-    // 1) SKU + barcode
+    // generate a timestamp SKU + barcode
     const sku = `SKU-${Date.now()}`;
     const png = await bwipjs.toBuffer({
       bcid:        'code128',
@@ -120,25 +124,26 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
-    // 2) OpenAI SEO
-    const filenames = req.files.map(f => f.originalname).join(', ');
+    // ask OpenAI—**note** model is now gpt-3.5-turbo
+    const names = req.files.map(f => f.originalname).join(', ');
     const chat = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model: 'gpt-3.5-turbo',
       messages: [
         { role: 'system', content: 'You are an SEO expert for a high-end fashion boutique.' },
         { role: 'user', content:
-          `Product images: ${filenames}. ` +
+          `Product images: ${names}. ` +
           `Generate a concise (≤60 chars) title and SEO description (≤160 chars).`
         }
       ],
       temperature: 0.7,
     });
-    const content = chat.choices[0].message.content;
-    const lines = content.split('\n').filter(l => l.trim());
-    const title = lines[0] || '';
+
+    const lines = chat.choices[0].message.content
+      .split('\n')
+      .filter(l => l.trim());
+    const title       = lines[0] || '';
     const description = lines[1] || '';
 
-    // 3) Return result
     res.json({ sku, barcode, seo: { title, description } });
   } catch (err) {
     console.error(err);
@@ -146,7 +151,7 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   }
 });
 
-// Serve React app for anything else
+// 8) Fallback to React UI
 app.get('*', (req, res) =>
   res.sendFile(path.join(__dirname, '../ui/build/index.html'))
 );
