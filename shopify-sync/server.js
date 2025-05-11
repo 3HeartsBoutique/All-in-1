@@ -1,4 +1,5 @@
 // shopify-sync/server.js
+
 const path    = require('path');
 const express = require('express');
 const axios   = require('axios');
@@ -20,7 +21,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// 3) DB migrations
+// 3) DB migrations: products, listings, and sales
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -43,6 +44,15 @@ async function initDb() {
       status TEXT,
       last_scrape_at TIMESTAMP,
       UNIQUE (channel, listing_id)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sales (
+      id SERIAL PRIMARY KEY,
+      sku TEXT,
+      title TEXT,
+      sold_at TIMESTAMP,
+      price NUMERIC
     );
   `);
 }
@@ -106,13 +116,12 @@ app.get('/sync/shopify', async (req, res) => {
 });
 
 // 6) File-upload + OpenAI setup
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });  
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // 7) Enrichment endpoint
 app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   try {
-    // generate a timestamp SKU + barcode
     const sku = `SKU-${Date.now()}`;
     const png = await bwipjs.toBuffer({
       bcid:        'code128',
@@ -124,7 +133,6 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
-    // ask OpenAI—**note** model is now gpt-3.5-turbo
     const names = req.files.map(f => f.originalname).join(', ');
     const chat = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
@@ -151,7 +159,26 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   }
 });
 
-// 8) Fallback to React UI
+// 8) Last‐sold endpoint – grab the 10 most recently sold items
+app.get('/api/last-sold', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT sku,
+             title,
+             to_char(sold_at, 'YYYY-MM-DD HH24:MI') AS sold_at,
+             price
+      FROM sales
+      ORDER BY sold_at DESC
+      LIMIT 10
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching last-sold:', err);
+    res.status(500).json({ error: 'Could not load last-sold items' });
+  }
+});
+
+// 9) Fallback to React UI
 app.get('*', (req, res) =>
   res.sendFile(path.join(__dirname, '../ui/build/index.html'))
 );
