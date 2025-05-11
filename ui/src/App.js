@@ -1,63 +1,73 @@
-import React, { useCallback, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
+import './App.css';
 
 function App() {
-  const [files, setFiles] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [lastSold, setLastSold] = useState([]);
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: 'image/*',
+    onDrop: (accepted) => {
+      const form = new FormData();
+      accepted.forEach(file => form.append('photos', file));
+      axios.post('/api/enrich', form)
+        .then(res => console.log('Enriched:', res.data))
+        .catch(err => console.error(err));
+    }
+  });
 
-  const onDrop = useCallback(accepted => {
-    setFiles(accepted);
+  useEffect(() => {
+    // fetch last‐sold on mount
+    axios.get('/api/last-sold')
+      .then(res => setLastSold(res.data))
+      .catch(console.error);
+
+    // refresh hourly
+    const iv = setInterval(() => {
+      axios.get('/api/last-sold').then(res => setLastSold(res.data));
+    }, 1000 * 60 * 60);
+
+    return () => clearInterval(iv);
   }, []);
 
-  const { getRootProps, getInputProps } = useDropzone({ onDrop });
-
-  const handleUpload = async () => {
-    if (!files.length) return;
-    setUploading(true);
-    const form = new FormData();
-    files.forEach(f => form.append('photos', f));
-
-    try {
-      const resp = await axios.post(
-        '/api/enrich',
-        form,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      );
-      setResult(resp.data);
-    } catch {
-      alert('Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
-
   return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>Upload Product Photos</h1>
-      <div
-        {...getRootProps()}
-        style={{
-          border: '2px dashed #666',
-          padding: '1rem',
-          marginBottom: '1rem',
-          cursor: 'pointer'
-        }}
-      >
+    <div className="App">
+      <h1>Three Hearts Boutique</h1>
+
+      {/* Upload dropzone */}
+      <div {...getRootProps()} className="dropzone">
         <input {...getInputProps()} />
-        {files.length
-          ? files.map(f => <p key={f.name}>{f.name}</p>)
-          : <p>Drag & drop photos here, or click to select</p>}
+        {
+          isDragActive
+            ? <p>Drop images here …</p>
+            : <p>Drag ‘n’ drop product photos here, or click to select</p>
+        }
       </div>
-      <button onClick={handleUpload} disabled={uploading}>
-        {uploading ? 'Uploading…' : 'Generate SKU & SEO'}
-      </button>
-      {result && (
-        <pre style={{ marginTop: '2rem', background: '#f4f4f4', padding: '1rem' }}>
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      )}
+
+      {/* Last 10 Sold */}
+      <section className="last-sold">
+        <h2>Last 10 Items Sold</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Title</th>
+              <th>Sold At</th>
+              <th>Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lastSold.map(item => (
+              <tr key={item.sold_at + item.sku}>
+                <td>{item.sku}</td>
+                <td>{item.title}</td>
+                <td>{item.sold_at}</td>
+                <td>${item.price}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
