@@ -12,16 +12,16 @@ require('dotenv').config();
 const app  = express();
 const port = process.env.PORT || 3000;
 
-// 1) Serve your React UI build
+// ─── 1) Serve React UI build ───────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../ui/build')));
 
-// 2) Postgres pool (Heroku SSL)
+// ─── 2) Postgres pool (Heroku SSL) ─────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// 3) DB migrations: products, listings, and sales
+// ─── 3) DB migrations: products, listings, sales ───────────────────────────────
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -33,6 +33,7 @@ async function initDb() {
       updated_at TIMESTAMP
     );
   `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS listings (
       id SERIAL PRIMARY KEY,
@@ -46,6 +47,7 @@ async function initDb() {
       UNIQUE (channel, listing_id)
     );
   `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales (
       id SERIAL PRIMARY KEY,
@@ -57,7 +59,7 @@ async function initDb() {
   `);
 }
 
-// 4) Shopify sync logic (unchanged)
+// ─── 4) Shopify fetch & sync logic ─────────────────────────────────────────────
 async function fetchProducts() {
   const shop  = process.env.SHOPIFY_STORE_DOMAIN;
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -72,6 +74,7 @@ async function syncProducts() {
   const products = await fetchProducts();
   for (const p of products) {
     const sku = p.variants[0].sku || `SKU-${p.id}`;
+
     await pool.query(
       `INSERT INTO products (sku, title, brand, created_at, updated_at)
          VALUES ($1,$2,$3,NOW(),NOW())
@@ -108,21 +111,23 @@ async function syncProducts() {
   console.log(`Synced ${products.length} products.`);
 }
 
-// 5) Expose the sync route
+// ─── 5) /sync/shopify endpoint ─────────────────────────────────────────────────
 app.get('/sync/shopify', async (req, res) => {
   await initDb();
   await syncProducts();
   res.send('Shopify sync complete');
 });
 
-// 6) File-upload + OpenAI setup
+// ─── 6) File-upload + OpenAI setup ─────────────────────────────────────────────
 const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 7) Enrichment endpoint
+// ─── 7) /api/enrich (SKU + barcode + SEO) ─────────────────────────────────────
 app.post('/api/enrich', upload.array('photos'), async (req, res) => {
+  await initDb();
   try {
     const sku = `SKU-${Date.now()}`;
+
     const png = await bwipjs.toBuffer({
       bcid:        'code128',
       text:        sku,
@@ -134,11 +139,11 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
     const names = req.files.map(f => f.originalname).join(', ');
-    const chat = await openai.chat.completions.create({
+    const chat  = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
         { role: 'system', content: 'You are an SEO expert for a high-end fashion boutique.' },
-        { role: 'user', content:
+        { role: 'user',   content:
           `Product images: ${names}. ` +
           `Generate a concise (≤60 chars) title and SEO description (≤160 chars).`
         }
@@ -146,9 +151,7 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
       temperature: 0.7,
     });
 
-    const lines = chat.choices[0].message.content
-      .split('\n')
-      .filter(l => l.trim());
+    const lines       = chat.choices[0].message.content.split('\n').filter(l => l.trim());
     const title       = lines[0] || '';
     const description = lines[1] || '';
 
@@ -159,14 +162,16 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   }
 });
 
-// 8) Last‐sold endpoint – grab the 10 most recently sold items
+// ─── 8) /api/last-sold (10 most recent from `sales`) ────────────────────────────
 app.get('/api/last-sold', async (req, res) => {
+  await initDb();
   try {
     const { rows } = await pool.query(`
-      SELECT sku,
-             title,
-             to_char(sold_at, 'YYYY-MM-DD HH24:MI') AS sold_at,
-             price
+      SELECT
+        sku,
+        title,
+        to_char(sold_at, 'YYYY-MM-DD HH24:MI') AS sold_at,
+        price
       FROM sales
       ORDER BY sold_at DESC
       LIMIT 10
@@ -178,9 +183,15 @@ app.get('/api/last-sold', async (req, res) => {
   }
 });
 
-// 9) Fallback to React UI
+// ─── 9) Fallback to React UI ───────────────────────────────────────────────────
 app.get('*', (req, res) =>
   res.sendFile(path.join(__dirname, '../ui/build/index.html'))
 );
 
-app.listen(port, () => console.log(`Running on port ${port}`));
+// ─── Bootstrap everything ──────────────────────────────────────────────────────
+;(async () => {
+  await initDb();            // create all tables up front
+  app.listen(port, () =>
+    console.log(`Running on port ${port}`)
+  );
+})();
