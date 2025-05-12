@@ -60,12 +60,15 @@ async function initDb() {
 
 // ─── 4) Shopify fetch & sync logic ─────────────────────────────────────────────
 async function fetchProducts() {
-  const shop  = process.env.SHOPIFY_STORE_DOMAIN;
+  const shop = process.env.SHOPIFY_STORE_DOMAIN;
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
-  const url   = `https://${shop}/admin/api/2025-04/products.json?limit=250`;
-  const resp  = await axios.get(url, { headers: { 'X-Shopify-Access-Token': token } });
+  const url = `https://${shop}/admin/api/2025-04/products.json?limit=250`;
+  const resp = await axios.get(url, {
+    headers: { 'X-Shopify-Access-Token': token }
+  });
   return resp.data.products;
 }
+
 async function syncProducts() {
   const products = await fetchProducts();
   for (const p of products) {
@@ -126,12 +129,12 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     // 7.a) Generate SKU and barcode
     const sku = `SKU-${Date.now()}`;
     const png = await bwipjs.toBuffer({
-      bcid:        'code128',
-      text:        sku,
-      scale:       3,
-      height:      10,
+      bcid: 'code128',
+      text: sku,
+      scale: 3,
+      height: 10,
       includetext: true,
-      textxalign:  'center',
+      textxalign: 'center',
     });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
@@ -141,14 +144,13 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     const imageTags = await Promise.all(
       filesToUse.map(async f => {
         const thumb = await sharp(f.buffer)
-          // shrink to 128px max width
           .resize({ width: 128, withoutEnlargement: true })
-          // use WebP at 50% quality for smallest size
           .webp({ quality: 50 })
           .toBuffer();
         return `![${f.originalname}](data:image/webp;base64,${thumb.toString('base64')})`;
       })
     );
+
     const promptContent = imageTags.join('\n') +
       '\nGenerate a concise (≤60 chars) title and SEO description (≤160 chars).';
 
@@ -156,21 +158,24 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'You are an AI product SEO specialist with deep expertise in Poshmark resale for the Canadian market.',
-    'When given one or more product images, focus on the single article of clothing shown. Identify its type (e.g. blazer, dress, jeans), brand, size, color, material/fabric, pattern, and condition.',
-    'Then output exactly four lines:',
-    '1) Title (≤60 characters) that starts with the item type and includes brand, size, and color.',
-    '2) Description (≤160 characters) that mentions the item type, brand, color, material, and condition (do NOT include any prices).',
-    '3) Suggested buy price: calculate as 70% of the average sale price for similar items on poshmark.ca and format as “Suggested buy price: $XXX CAD”.',
-    '4) Suggested sell price: calculate as the average sale price of similar items sold recently on poshmark.ca and format as “Suggested sell price: $XXX CAD”.' },
+        {
+          role: 'system',
+          content: `You are an AI product SEO specialist with deep expertise in Poshmark resale for the Canadian market.
+When given one or more product images, focus on the single article of clothing shown. Identify its type (e.g. blazer, dress, jeans), brand, size, color, material/fabric, pattern, and condition.
+Then output exactly four lines:
+1) Title (≤60 characters) that starts with the item type and includes brand, size, and color.
+2) Description (≤160 characters) that mentions the item type, brand, color, material, and condition (do NOT include any prices).
+3) Suggested buy price: calculate as 70% of the average sale price for similar items on poshmark.ca and format as “Suggested buy price: $XXX CAD”.
+4) Suggested sell price: calculate as the average sale price of similar items sold recently on poshmark.ca and format as “Suggested sell price: $XXX CAD”.`
+        },
         { role: 'user', content: promptContent },
       ],
       temperature: 0.7,
     });
 
     // 7.d) Parse and return
-    const lines       = chat.choices[0].message.content.split('\n').filter(l => l.trim());
-    const title       = lines[0] || '';
+    const lines = chat.choices[0].message.content.split('\n').filter(l => l.trim());
+    const title = lines[0] || '';
     const description = lines[1] || '';
 
     res.json({ sku, barcode, seo: { title, description } });
@@ -207,7 +212,7 @@ app.get('*', (req, res) =>
 );
 
 // ─── Bootstrap everything ──────────────────────────────────────────────────────
-;(async () => {
+(async () => {
   await initDb();
   app.listen(port, () =>
     console.log(`Running on port ${port}`)
