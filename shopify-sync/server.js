@@ -63,9 +63,7 @@ async function fetchProducts() {
   const shop = process.env.SHOPIFY_STORE_DOMAIN;
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   const url = `https://${shop}/admin/api/2025-04/products.json?limit=250`;
-  const resp = await axios.get(url, {
-    headers: { 'X-Shopify-Access-Token': token }
-  });
+  const resp = await axios.get(url, { headers: { 'X-Shopify-Access-Token': token } });
   return resp.data.products;
 }
 
@@ -116,10 +114,7 @@ app.get('/sync/shopify', async (req, res) => {
 });
 
 // ─── 6) File-upload + OpenAI setup ─────────────────────────────────────────────
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── 7) /api/enrich (SKU + barcode + SEO) ─────────────────────────────────────
@@ -128,19 +123,11 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   try {
     // 7.a) Generate SKU and barcode
     const sku = `SKU-${Date.now()}`;
-    const png = await bwipjs.toBuffer({
-      bcid: 'code128',
-      text: sku,
-      scale: 3,
-      height: 10,
-      includetext: true,
-      textxalign: 'center',
-    });
+    const png = await bwipjs.toBuffer({ bcid: 'code128', text: sku, scale: 3, height: 10, includetext: true, textxalign: 'center' });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
     // 7.b) Resize and compress up to 3 images for GPT prompt
-    const maxImages = 3;
-    const filesToUse = req.files.slice(0, maxImages);
+    const filesToUse = req.files.slice(0, 3);
     const imageTags = await Promise.all(
       filesToUse.map(async f => {
         const thumb = await sharp(f.buffer)
@@ -163,26 +150,26 @@ You must *inspect* the images and identify the single garment shown—its type (
 Then output exactly four lines:
 1) Title (≤60 chars), starting with the item type and including brand, size & color.
 2) Description (≤160 chars) mentioning item type, brand, color, material & condition (no prices).
-3) Suggested buy price: 70% of the average sale price for similar items on Poshmark.ca, formatted “Suggested buy price: $XXX CAD”.
-4) Suggested sell price: average sale price on Poshmark.ca, formatted “Suggested sell price: $XXX CAD”.`        
+3) Suggested buy price: 70% of the average sale price for similar items on poshmark.ca, formatted “Suggested buy price: $XXX CAD”.
+4) Suggested sell price: average sale price on poshmark.ca, formatted “Suggested sell price: $XXX CAD`.`
         },
-        {
-          role: 'user',
-          content:
-            'Images:\n' +
-            imageTags.join('\n') +
-            '\nPlease follow the system instructions above.'
-        }
+        { role: 'user', content: 'Images:\n' + imageTags.join('\n') + '\nPlease follow the system instructions above.' }
       ],
       temperature: 0.7,
     });
 
-    // 7.d) Parse and return
+    // 7.d) Parse and return all four lines
     const lines = chat.choices[0].message.content.split('\n').filter(l => l.trim());
-    const title = lines[0] || '';
-    const description = lines[1] || '';
+    const title              = lines[0] || '';
+    const description        = lines[1] || '';
+    const suggestedBuyPrice  = lines[2] || '';
+    const suggestedSellPrice = lines[3] || '';
 
-    res.json({ sku, barcode, seo: { title, description } });
+    res.json({
+      sku,
+      barcode,
+      seo: { title, description, suggestedBuyPrice, suggestedSellPrice }
+    });
   } catch (err) {
     console.error('Enrichment failed:', err);
     res.status(500).json({ error: 'Enrichment failed' });
@@ -194,11 +181,7 @@ app.get('/api/last-sold', async (req, res) => {
   await initDb();
   try {
     const { rows } = await pool.query(`
-      SELECT
-        sku,
-        title,
-        to_char(sold_at, 'YYYY-MM-DD HH24:MI') AS sold_at,
-        price
+      SELECT sku, title, to_char(sold_at, 'YYYY-MM-DD HH24:MI') AS sold_at, price
       FROM sales
       ORDER BY sold_at DESC
       LIMIT 10
@@ -211,14 +194,10 @@ app.get('/api/last-sold', async (req, res) => {
 });
 
 // ─── 9) Fallback to React UI ───────────────────────────────────────────────────
-app.get('*', (req, res) =>
-  res.sendFile(path.join(__dirname, '../ui/build/index.html'))
-);
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../ui/build/index.html')));
 
 // ─── Bootstrap everything ──────────────────────────────────────────────────────
 (async () => {
   await initDb();
-  app.listen(port, () =>
-    console.log(`Running on port ${port}`)
-  );
+  app.listen(port, () => console.log(`Running on port ${port}`));
 })();
