@@ -151,24 +151,28 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
       })
     );
 
-    const promptContent = imageTags.join('\n') +
-      '\nGenerate a concise (≤60 chars) title and SEO description (≤160 chars).';
-
     // 7.c) Call OpenAI with vision-capable model
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are an AI product SEO specialist with deep expertise in Poshmark resale for the Canadian market.
-When given one or more product images, focus on the single article of clothing shown. Identify its type (e.g. blazer, dress, jeans), brand, size, color, material/fabric, pattern, and condition.
+          content: `You are an AI image‐analysis & SEO specialist for Poshmark Canada.
+The user will include one or more product photos as markdown image links.
+You must *inspect* the images and identify the single garment shown—its type (e.g., off‐shoulder midi dress), brand (if visible), size, color(s), fabric/material, pattern, and condition.
 Then output exactly four lines:
-1) Title (≤60 characters) that starts with the item type and includes brand, size, and color.
-2) Description (≤160 characters) that mentions the item type, brand, color, material, and condition (do NOT include any prices).
-3) Suggested buy price: calculate as 70% of the average sale price for similar items on poshmark.ca and format as “Suggested buy price: $XXX CAD”.
-4) Suggested sell price: calculate as the average sale price of similar items sold recently on poshmark.ca and format as “Suggested sell price: $XXX CAD”.`
+1) Title (≤60 chars), starting with the item type and including brand, size & color.
+2) Description (≤160 chars) mentioning item type, brand, color, material & condition (no prices).
+3) Suggested buy price: 70% of the average sale price for similar items on Poshmark.ca, formatted “Suggested buy price: $XXX CAD”.
+4) Suggested sell price: average sale price on Poshmark.ca, formatted “Suggested sell price: $XXX CAD”.`        
         },
-        { role: 'user', content: promptContent },
+        {
+          role: 'user',
+          content:
+            'Images:\n' +
+            imageTags.join('\n') +
+            '\nPlease follow the system instructions above.'
+        }
       ],
       temperature: 0.7,
     });
