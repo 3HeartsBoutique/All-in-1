@@ -156,7 +156,13 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'You are an SEO expert for a high-end fashion boutique.' },
+        { role: 'system', content: 'You are an AI product SEO specialist with deep expertise in Poshmark resale for the Canadian market.',
+    'When given one or more product images, focus on the single article of clothing shown. Identify its type (e.g. blazer, dress, jeans), brand, size, color, material/fabric, pattern, and condition.',
+    'Then output exactly four lines:',
+    '1) Title (≤60 characters) that starts with the item type and includes brand, size, and color.',
+    '2) Description (≤160 characters) that mentions the item type, brand, color, material, and condition (do NOT include any prices).',
+    '3) Suggested buy price: calculate as 70% of the average sale price for similar items on poshmark.ca and format as “Suggested buy price: $XXX CAD”.',
+    '4) Suggested sell price: calculate as the average sale price of similar items sold recently on poshmark.ca and format as “Suggested sell price: $XXX CAD”.' },
         { role: 'user', content: promptContent },
       ],
       temperature: 0.7,
