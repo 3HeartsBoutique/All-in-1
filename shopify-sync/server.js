@@ -6,6 +6,7 @@ const axios   = require('axios');
 const { Pool } = require('pg');
 const multer  = require('multer');
 const bwipjs  = require('bwip-js');
+const sharp   = require('sharp');
 const { OpenAI } = require('openai');
 require('dotenv').config();
 
@@ -33,7 +34,6 @@ async function initDb() {
       updated_at TIMESTAMP
     );
   `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS listings (
       id SERIAL PRIMARY KEY,
@@ -47,7 +47,6 @@ async function initDb() {
       UNIQUE (channel, listing_id)
     );
   `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales (
       id SERIAL PRIMARY KEY,
@@ -67,12 +66,10 @@ async function fetchProducts() {
   const resp  = await axios.get(url, { headers: { 'X-Shopify-Access-Token': token } });
   return resp.data.products;
 }
-
 async function syncProducts() {
   const products = await fetchProducts();
   for (const p of products) {
     const sku = p.variants[0].sku || `SKU-${p.id}`;
-
     await pool.query(
       `INSERT INTO products (sku, title, brand, created_at, updated_at)
          VALUES ($1,$2,$3,NOW(),NOW())
@@ -80,8 +77,7 @@ async function syncProducts() {
          SET title = EXCLUDED.title, updated_at = NOW()`,
       [sku, p.title, p.vendor]
     );
-
-    const inv = p.variants.reduce((sum,v) => sum + v.inventory_quantity, 0);
+    const inv = p.variants.reduce((sum, v) => sum + v.inventory_quantity, 0);
     await pool.query(
       `INSERT INTO listings 
          (product_id, channel, listing_id, listing_url, inventory_count, status, last_scrape_at)
@@ -119,7 +115,7 @@ app.get('/sync/shopify', async (req, res) => {
 // ─── 6) File-upload + OpenAI setup ─────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -127,7 +123,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   await initDb();
   try {
-    // Generate a unique SKU and barcode
+    // 7.a) Generate SKU and barcode
     const sku = `SKU-${Date.now()}`;
     const png = await bwipjs.toBuffer({
       bcid:        'code128',
@@ -139,26 +135,34 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
-    // Call OpenAI with vision-capable model and embed images
+    // 7.b) Resize and compress up to 3 images for GPT prompt
+    const maxImages = 3;
+    const filesToUse = req.files.slice(0, maxImages);
+    const imageTags = await Promise.all(
+      filesToUse.map(async f => {
+        const thumb = await sharp(f.buffer)
+          // shrink to 128px max width
+          .resize({ width: 128, withoutEnlargement: true })
+          // use WebP at 50% quality for smallest size
+          .webp({ quality: 50 })
+          .toBuffer();
+        return `![${f.originalname}](data:image/webp;base64,${thumb.toString('base64')})`;
+      })
+    );
+    const promptContent = imageTags.join('\n') +
+      '\nGenerate a concise (≤60 chars) title and SEO description (≤160 chars).';
+
+    // 7.c) Call OpenAI with vision-capable model
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are an SEO expert for a high-end fashion boutique.' },
-        {
-          role: 'user',
-          content:
-            req.files
-              .map(f =>
-                `![${f.originalname}](data:${f.mimetype};base64,${f.buffer.toString('base64')})`
-              )
-              .join('\n')
-            + '\nGenerate a concise (≤60 chars) title and SEO description (≤160 chars).'
-        }
+        { role: 'user', content: promptContent },
       ],
       temperature: 0.7,
     });
 
-    // Extract title and description
+    // 7.d) Parse and return
     const lines       = chat.choices[0].message.content.split('\n').filter(l => l.trim());
     const title       = lines[0] || '';
     const description = lines[1] || '';
