@@ -64,9 +64,7 @@ async function fetchProducts() {
   const shop  = process.env.SHOPIFY_STORE_DOMAIN;
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   const url   = `https://${shop}/admin/api/2025-04/products.json?limit=250`;
-  const resp  = await axios.get(url, {
-    headers: { 'X-Shopify-Access-Token': token }
-  });
+  const resp  = await axios.get(url, { headers: { 'X-Shopify-Access-Token': token } });
   return resp.data.products;
 }
 
@@ -119,15 +117,18 @@ app.get('/sync/shopify', async (req, res) => {
 });
 
 // ─── 6) File-upload + OpenAI setup ─────────────────────────────────────────────
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── 7) /api/enrich (SKU + barcode + SEO) ─────────────────────────────────────
 app.post('/api/enrich', upload.array('photos'), async (req, res) => {
   await initDb();
   try {
+    // Generate a unique SKU and barcode
     const sku = `SKU-${Date.now()}`;
-
     const png = await bwipjs.toBuffer({
       bcid:        'code128',
       text:        sku,
@@ -138,26 +139,33 @@ app.post('/api/enrich', upload.array('photos'), async (req, res) => {
     });
     const barcode = `data:image/png;base64,${png.toString('base64')}`;
 
-    const names = req.files.map(f => f.originalname).join(', ');
-    const chat  = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+    // Call OpenAI with vision-capable model and embed images
+    const chat = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are an SEO expert for a high-end fashion boutique.' },
-        { role: 'user',   content:
-          `Product images: ${names}. ` +
-          `Generate a concise (≤60 chars) title and SEO description (≤160 chars).`
+        {
+          role: 'user',
+          content:
+            req.files
+              .map(f =>
+                `![${f.originalname}](data:${f.mimetype};base64,${f.buffer.toString('base64')})`
+              )
+              .join('\n')
+            + '\nGenerate a concise (≤60 chars) title and SEO description (≤160 chars).'
         }
       ],
       temperature: 0.7,
     });
 
+    // Extract title and description
     const lines       = chat.choices[0].message.content.split('\n').filter(l => l.trim());
     const title       = lines[0] || '';
     const description = lines[1] || '';
 
     res.json({ sku, barcode, seo: { title, description } });
   } catch (err) {
-    console.error(err);
+    console.error('Enrichment failed:', err);
     res.status(500).json({ error: 'Enrichment failed' });
   }
 });
@@ -190,7 +198,7 @@ app.get('*', (req, res) =>
 
 // ─── Bootstrap everything ──────────────────────────────────────────────────────
 ;(async () => {
-  await initDb();            // create all tables up front
+  await initDb();
   app.listen(port, () =>
     console.log(`Running on port ${port}`)
   );
