@@ -1,38 +1,29 @@
-.App {
+.dropzone {
+  margin: 1rem auto;
+  padding: 2rem;
+  width: 80%;
+  max-width: 500px;
+  border: 2px dashed #888;
   text-align: center;
+  cursor: pointer;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+.last-sold {
+  margin: 2rem auto;
+  width: 90%;
+  max-width: 800px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.last-sold table {
+  width: 100%;
+  border-collapse: collapse;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+.last-sold th, .last-sold td {
+  border: 1px solid #ddd;
+  padding: 0.5rem;
 }
 
-.App-link {
-  color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.last-sold th {
+  background: #f4f4f4;
 }
